@@ -15,7 +15,7 @@ export class CategoriesService {
   
   
   create(createCategoryDto: CreateCategoryDto) {
-    return this.categoryRepository.save(Category);
+    return this.categoryRepository.save(createCategoryDto);
   }
 
   findAll() {
