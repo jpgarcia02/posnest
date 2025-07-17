@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, FindManyOptions, Repository } from 'typeorm';
 import { TransactionContents, Transaction } from './entities/transaction.entity';
 import { Product } from '../products/entities/product.entity';
+import { endOfDay, isValid, parseISO, startOfDay } from 'date-fns';
 
 @Injectable()
 export class TransactionsService {
@@ -19,39 +20,41 @@ export class TransactionsService {
 
 
    async create(createTransactionDto: CreateTransactionDto) {
-  await this.productRepository.manager.transaction(async (tem) => {
-
-    // 1. Guardar la transacción UNA VEZ al inicio
+  await this.productRepository.manager.transaction(async (transactionEntityManager) => {
     const transaction = new Transaction();
-    transaction.total = createTransactionDto.total;
-    await tem.save(transaction);  // <-- mueve esto afuera del for
+    const total = createTransactionDto.contents.reduce((total,item)=>total+ (item.quantity * item.price)  ,0)
+    transaction.total = total
 
-    // 2. Recorrer los contenidos
     for (const contents of createTransactionDto.contents) {
-      const product = await tem.findOneBy(Product, { id: contents.productId });
+      const product = await transactionEntityManager.findOneBy(Product, { id: contents.productId });
+      
+      const errors: string[] =[]
       if (!product) {
-        throw new Error(`Producto con ID ${contents.productId} no existe`);
-      }
+        errors.push(`Producto con ID ${contents.productId} no existe`)
+  throw new NotFoundException(errors);
+}
+
       if (contents.quantity > product.inventory) {
-        throw new BadRequestException(`El articulo ${product.name} excede la cantidad disponible`);
+        throw new BadRequestException(`El artículo ${product.name} excede la cantidad disponible`);
       }
 
-      // 3. Restar inventario y GUARDAR el producto
       product.inventory -= contents.quantity;
-      await tem.save(product);  // <-- esta línea hace que baje el stock
 
-      // 4. Crear y guardar detalle
-      const transactionContents = new TransactionContents();
-      transactionContents.price = contents.price;
-      transactionContents.quantity = contents.quantity;
-      transactionContents.product = product;
-      transactionContents.transaction = transaction;
+      // ✅ Guardar el producto actualizado
+      await transactionEntityManager.save(product);
 
-      await tem.save(transactionContents); // <-- usa la entidad, no objeto plano
+      const transactionContent = new TransactionContents();
+      transactionContent.price = contents.price;
+      transactionContent.product = product;
+      transactionContent.quantity = contents.quantity;
+      transactionContent.transaction = transaction;
+
+      await transactionEntityManager.save(transaction);
+      await transactionEntityManager.save(transactionContent);
     }
   });
 
-  return 'Venta Almacenada Correctamente';
+  return "Venta Almacenada Correctamente";
 }
 
   
@@ -60,19 +63,78 @@ export class TransactionsService {
   
   
   
-  findAll() {
-    return `This action returns all transactions`;
+  findAll(transactionDate?:string) {
+    const options: FindManyOptions<Transaction> = {
+      relations:{
+        contents: true 
+      }
+
+    }
+
+    if(transactionDate){
+      const date = parseISO(transactionDate)
+        if(!isValid(date)){
+          throw new BadRequestException('Fecha no valida ')
+        }
+
+        const start = startOfDay(date)
+        const end = endOfDay(date)
+
+        options.where ={
+          transactionDate : Between(start,end)
+        }
+      
+    }
+    return this.transactionRepository.find(options);
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} transaction`;
+  async findOne(id: number) {
+    const transaction = await this.transactionRepository.findOne({
+      where:{
+        id
+      },
+      relations:{
+        contents:true 
+      }
+
+
+    })
+
+    if(!transaction){
+      throw new NotFoundException('Transaccion no encontrada')
+    }
+
+
+
+    return transaction;
   }
 
   update(id: number, updateTransactionDto: UpdateTransactionDto) {
     return `This action updates a #${id} transaction`;
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} transaction`;
+  async remove(id: number) {
+  const transaction = await this.transactionRepository.findOne({
+    where: { id },
+    relations: ['contents', 'contents.product'], // Carga productos relacionados
+  });
+
+  if (!transaction) {
+    throw new NotFoundException(`Transacción con ID ${id} no encontrada`);
   }
+
+  // ✅ Restablecer inventario
+  for (const content of transaction.contents) {
+    content.product.inventory += content.quantity; // Devuelve la cantidad
+    await this.productRepository.save(content.product);
+  }
+
+  // ✅ Eliminar transaction_contents primero
+  await this.transactionContentsRepository.remove(transaction.contents);
+
+  // ✅ Luego eliminar la transacción
+  await this.transactionRepository.remove(transaction);
+
+  return { message: 'Venta eliminada y stock restablecido' };
+}
 }
