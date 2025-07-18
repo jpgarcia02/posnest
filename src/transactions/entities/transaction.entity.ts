@@ -1,3 +1,4 @@
+import { Coupon } from "src/coupons/entities/coupon.entity";
 import { Product } from "src/products/entities/product.entity";
 import { Column, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 
@@ -8,6 +9,13 @@ export class Transaction {
 
     @PrimaryGeneratedColumn()
     id: number
+
+
+    @Column({type: 'varchar',length:30, nullable: true})
+    coupon:string
+
+    @Column({type: 'decimal',nullable: true})
+    discount: number 
 
     @Column('decimal')
     total: number
