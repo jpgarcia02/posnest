@@ -1,5 +1,5 @@
-import { Coupon } from "src/coupons/entities/coupon.entity";
-import { Product } from "src/products/entities/product.entity";
+import { Coupon } from "../../coupons/entities/coupon.entity";
+import { Product } from "../../products/entities/product.entity";
 import { Column, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 
 

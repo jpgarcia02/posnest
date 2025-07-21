@@ -6,7 +6,7 @@ import { Between, FindManyOptions, Repository } from 'typeorm';
 import { TransactionContents, Transaction } from './entities/transaction.entity';
 import { Product } from '../products/entities/product.entity';
 import { endOfDay, isValid, parseISO, startOfDay } from 'date-fns';
-import { CouponsService } from 'src/coupons/coupons.service';
+import { CouponsService } from '../coupons/coupons.service';
 
 @Injectable()
 export class TransactionsService {
@@ -29,7 +29,11 @@ export class TransactionsService {
     
     if(createTransactionDto.coupon){
       const coupon = await this.couponService.applyCoupon(createTransactionDto.coupon)
-
+      
+      const discount = (coupon.percentage/100)*total
+      transaction.discount=discount
+      transaction.coupon = coupon.name
+      transaction.total -= discount
     }
     
 
